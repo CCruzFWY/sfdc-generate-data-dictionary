@@ -5,6 +5,39 @@ const program = require('commander');
 const orchestrator = require('../index.js');
 const pjson = require('../package.json');
 
+// Parse allCustomObjects and mergeObjects directly from process.argv before commander processes it
+// This is needed because commander.js has issues with boolean default values
+let allCustomObjectsValue = true; // default
+let mergeObjectsValue = false; // default
+for (let i = 0; i < process.argv.length; i++) {
+  if (process.argv[i] === '-c' || process.argv[i] === '--allCustomObjects') {
+    if (i + 1 < process.argv.length) {
+      const nextArg = process.argv[i + 1];
+      // Check if next argument is not another option (doesn't start with -)
+      if (!nextArg.startsWith('-')) {
+        allCustomObjectsValue = nextArg;
+        break;
+      }
+    }
+    // If -c is present without value, it means true (flag is set)
+    allCustomObjectsValue = true;
+    break;
+  }
+  if (process.argv[i] === '-m' || process.argv[i] === '--mergeObjects') {
+    if (i + 1 < process.argv.length) {
+      const nextArg = process.argv[i + 1];
+      // Check if next argument is not another option (doesn't start with -)
+      if (!nextArg.startsWith('-')) {
+        mergeObjectsValue = nextArg;
+        break;
+      }
+    }
+    // If -m is present without value, it means true (flag is set)
+    mergeObjectsValue = true;
+    break;
+  }
+}
+
 program
   .description(pjson.description)
   .version(pjson.version)
@@ -13,6 +46,7 @@ program
   .option('-l, --loginUrl [loginUrl]', 'salesforce login URL [https://login.salesforce.com]', 'https://login.salesforce.com')
   .option('-a, --apiVersion [apiVersion]', 'salesforce API Version [48.0]', '48.0')
   .option('-c, --allCustomObjects [allCustomObjects]', 'retrieve all custom objects [true]', true)
+  .option('-m, --mergeObjects [mergeObjects]', 'retrieve both custom and standard objects [false]', false)
   .option('-lc, --lucidchart [lucidchart]', 'generate ERD file for Lucidchart [true]', true)
   .option('-s, --sobjects [sobjects]', 'sObjects to retrieve separated with commas')
   .option('-D, --debug [debug]', 'generate debug log file [false]', false)
@@ -23,6 +57,14 @@ program
   .option('-t, --outputTime [outputTime]', 'Display Hours in the file name', false)
   .option('-o, --output [dir]', 'salesforce data dictionary directory path [.]', '.')
   .parse(process.argv);
+
+// Override the value from commander with the one we parsed directly from argv
+if (typeof allCustomObjectsValue !== 'undefined') {
+  program.allCustomObjects = allCustomObjectsValue;
+}
+if (typeof mergeObjectsValue !== 'undefined') {
+  program.mergeObjects = mergeObjectsValue;
+}
 
 orchestrator(program, console.log)
 .catch(function(err){

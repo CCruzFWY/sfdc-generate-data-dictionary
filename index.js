@@ -40,22 +40,47 @@ module.exports = (config, logger) => {
   if (typeof config.outputTime === 'undefined' || config.outputTime === null) {
     config.outputTime = false;
   }
+  // Handle allCustomObjects conversion
+  // Commander.js may pass boolean true/false or string "true"/"false"
   if (typeof config.allCustomObjects === 'undefined' || config.allCustomObjects === null) {
     config.allCustomObjects = true;
+  } else if (typeof config.allCustomObjects === 'string') {
+    // Convert string "true"/"false" to boolean (case-insensitive)
+    const lowerValue = config.allCustomObjects.toLowerCase().trim();
+    config.allCustomObjects = (lowerValue === "true" || lowerValue === "1" || lowerValue === "yes");
+  } else if (typeof config.allCustomObjects === 'boolean') {
+    // Already a boolean, keep as is
+    config.allCustomObjects = config.allCustomObjects;
+  } else {
+    // For any other case, try to convert or default to true
+    config.allCustomObjects = Boolean(config.allCustomObjects);
   }
-  config.allCustomObjects = (config.allCustomObjects === "true" || config.allCustomObjects === true);
+
+  // Handle mergeObjects conversion
+  if (typeof config.mergeObjects === 'undefined' || config.mergeObjects === null) {
+    config.mergeObjects = false;
+  } else if (typeof config.mergeObjects === 'string') {
+    // Convert string "true"/"false" to boolean (case-insensitive)
+    const lowerValue = config.mergeObjects.toLowerCase().trim();
+    config.mergeObjects = (lowerValue === "true" || lowerValue === "1" || lowerValue === "yes");
+  } else if (typeof config.mergeObjects === 'boolean') {
+    // Already a boolean, keep as is
+    config.mergeObjects = config.mergeObjects;
+  } else {
+    // For any other case, try to convert or default to false
+    config.mergeObjects = Boolean(config.mergeObjects);
+  }
 
   if (typeof config.lucidchart === 'undefined' || config.lucidchart === null) {
     config.lucidchart = true;
   }
   config.lucidchart = (config.lucidchart === "true" || config.lucidchart === true);
 
-  if (typeof config.sobjects === 'undefined' || config.sobjects === null) {
-    config.objects = [
-      'Account',
-      'Contact',
-      'User'
-    ];
+  // Track if sobjects was explicitly specified
+  const sobjectsSpecified = typeof config.sobjects !== 'undefined' && config.sobjects !== null;
+  
+  if (!sobjectsSpecified) {
+    config.objects = [];
   } else {
     // If an array is passed to the module
     if (Array.isArray(config.sobjects)) {
@@ -117,7 +142,82 @@ module.exports = (config, logger) => {
         utils.log('Connected as ' + config.username, config);
       }
 
-      if (config.allCustomObjects) {
+      if (config.mergeObjects) {
+        // When mergeObjects is true, retrieve both custom and standard objects
+        conn.describeGlobal().then(res => {
+          // Initialize with empty array
+          config.objects = [];
+          
+          for (let i = 0; i < res.sobjects.length; i++) {
+            let object = res.sobjects[i];
+            
+            // Add custom objects
+            if (object.custom && (object.name.indexOf('__c') !== -1)) {
+              if (config.debug)
+                utils.log('# excludeManagedPackage (' + config.excludeManagedPackage + '): ' + object.name, config);
+
+              if (config.excludeManagedPackage) {
+                if ((object.name.split('__').length - 1 < 2))
+                  config.objects.push(object.name);
+              } else {
+                config.objects.push(object.name);
+              }
+            }
+            
+            // Add standard objects
+            if (object.name.indexOf('__c') === -1) {
+              // Only include objects that meet all standard object criteria
+              if (object.custom === false &&
+                  object.customSetting === false &&
+                  object.layoutable === true &&
+                  object.createable === true &&
+                  object.updateable === true &&
+                  object.deletable === true &&
+                  object.deprecatedAndHidden === false &&
+                  object.keyPrefix !== null &&
+                  object.queryable === true) {
+                if (config.debug)
+                  utils.log('# Standard object found: ' + object.name + ' (custom: ' + object.custom + ')', config);
+                config.objects.push(object.name);
+              }
+            }
+          }
+
+          logger('Total objects found (custom + standard): ' + config.objects.length);
+          if (config.debug) {
+            utils.log('Total objects found (custom + standard): ' + config.objects.length, config);
+            utils.log(JSON.stringify(config.objects), config);
+          }
+
+          if (config.objects.length > 0) {
+            const downloader = new Downloader(config, logger, conn);
+            const builder = new ExcelBuilder(config, logger);
+
+            // Download metadata files
+            downloader.execute().then(result => {
+              logger(result + ' downloaded');
+              // Generate the excel file
+              return builder.generate();
+            }).then(result => {
+              resolve();
+            }).catch(err => {
+              logger('Error during download/generation: ' + err);
+              if (config.debug) {
+                utils.log(err, config);
+              }
+              reject(err);
+            });
+          } else {
+            resolve();
+          }
+        }).catch(err => {
+          logger('Error during describeGlobal: ' + err);
+          if (config.debug) {
+            utils.log(err, config);
+          }
+          reject(err);
+        });
+      } else if (config.allCustomObjects) {
         conn.describeGlobal().then(res => {
           for (let i = 0; i < res.sobjects.length; i++) {
             let object = res.sobjects[i];
@@ -138,6 +238,7 @@ module.exports = (config, logger) => {
             }
           }
 
+          logger('Total custom objects found: ' + config.objects.length);
           if (config.debug)
             utils.log(JSON.stringify(config.objects), config);
 
@@ -154,20 +255,90 @@ module.exports = (config, logger) => {
           })
         });
       } else {
-        if (config.objects.length > 0) {
-          const downloader = new Downloader(config, logger, conn);
-          const builder = new ExcelBuilder(config, logger);
+        // When allCustomObjects is false
+        if (!sobjectsSpecified) {
+          // If sobjects was not specified, search for all standard objects
+          conn.describeGlobal().then(res => {
+            // Initialize with empty array to replace default objects
+            config.objects = [];
+            for (let i = 0; i < res.sobjects.length; i++) {
+              let object = res.sobjects[i];
+              
+              // If the sObject is a standard object (doesn't contain __c in the name)
+              // The most reliable way to identify standard objects is by checking if the name contains __c
+              if (object.name.indexOf('__c') === -1) {
+                // Only include objects that meet all standard object criteria
+                if (object.custom === false &&
+                    object.customSetting === false &&
+                    object.layoutable === true &&
+                    object.createable === true &&
+                    object.updateable === true &&
+                    object.deletable === true &&
+                    object.deprecatedAndHidden === false &&
+                    object.keyPrefix !== null &&
+                    object.queryable === true) {
+                  if (config.debug)
+                    utils.log('# Standard object found: ' + object.name + ' (custom: ' + object.custom + ')', config);
+                  config.objects.push(object.name);
+                }
+              }
+            }
 
-          // Download metadata files
-          downloader.execute().then(result => {
-            logger(result + ' downloaded');
-            // Generate the excel file
-            return builder.generate();
+            logger('Total standard objects found: ' + config.objects.length);
+            if (config.debug) {
+              utils.log('Total standard objects found: ' + config.objects.length, config);
+              utils.log(JSON.stringify(config.objects), config);
+            }
 
-          }).then(result => {
-            resolve();
+            if (config.objects.length > 0) {
+              const downloader = new Downloader(config, logger, conn);
+              const builder = new ExcelBuilder(config, logger);
+
+              // Download metadata files
+              downloader.execute().then(result => {
+                logger(result + ' downloaded');
+                // Generate the excel file
+                return builder.generate();
+
+              }).then(result => {
+                resolve();
+              }).catch(err => {
+                logger('Error during download/generation: ' + err);
+                if (config.debug) {
+                  utils.log(err, config);
+                }
+                reject(err);
+              });
+            } else {
+              logger('No standard objects found. Please check your org configuration.');
+              resolve();
+            }
+          }).catch(err => {
+            logger('Error during describeGlobal: ' + err);
+            if (config.debug) {
+              utils.log(err, config);
+            }
+            reject(err);
           });
+        } else {
+          // If sobjects was specified, use only those objects
+          logger('Total objects specified: ' + config.objects.length);
+          if (config.objects.length > 0) {
+            const downloader = new Downloader(config, logger, conn);
+            const builder = new ExcelBuilder(config, logger);
 
+            // Download metadata files
+            downloader.execute().then(result => {
+              logger(result + ' downloaded');
+              // Generate the excel file
+              return builder.generate();
+
+            }).then(result => {
+              resolve();
+            });
+          } else {
+            resolve();
+          }
         }
       }
     }).catch(reject);

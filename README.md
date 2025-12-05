@@ -1,4 +1,5 @@
 # <img src="https://public.gavignon.io/images/sfdc-generate-data-dictionary-title.png" height="32">
+
 ![version](https://img.shields.io/badge/version-1.2.15-blue)
 
 Generate data dictionary from a Salesforce Org. This tool can also generate a file that can be imported in Lucidchart to define entities and relationships.
@@ -35,6 +36,9 @@ $ sgd -h
     -l, --loginUrl [loginUrl]                             salesforce login URL [https://login.salesforce.com]
     -a, --apiVersion [apiVersion]                         salesforce API Version [48.0]
     -c, --allCustomObjects [allCustomObjects]             retrieve all custom objects [true]
+                                                           Use 'false' to retrieve all standard objects instead
+    -m, --mergeObjects [mergeObjects]                     retrieve both custom and standard objects [false]
+                                                           Combines custom and standard objects in one file
     -lc, --lucidchart [lucidchart]                        generate ERD file for Lucidchart [true]
     -s, --sobjects [sobjects]                             sObjects to retrieve separated with commas
     -D, --debug [debug]                                   generate debug log file [false]
@@ -42,12 +46,40 @@ $ sgd -h
     -e, --excludeManagedPackage [excludeManagedPackage]   exclude managed packaged [true]
     -ht, --hideTechFields [hideTechFields]                hide tech fields [false]
     -tp, --techFieldPrefix [techFieldPrefix]              Tech field prefix ['TECH_']
+    -t, --outputTime [outputTime]                         Display Hours in the file name [false]
     -o, --output [dir]                                    salesforce data dictionary directory path [.]
 ```
 
-#### Example
+#### Examples
+
+**Retrieve all custom objects (default behavior):**
+
+```
+$ sgd -u "my.username@mydomain.com" -p "password" -l "https://test.salesforce.com" -c true
+```
+
+**Retrieve all standard objects:**
+
+```
+$ sgd -u "my.username@mydomain.com" -p "password" -l "https://test.salesforce.com" -c false
+```
+
+**Retrieve both custom and standard objects (merged):**
+
+```
+$ sgd -u "my.username@mydomain.com" -p "password" -l "https://test.salesforce.com" -m true
+```
+
+**Retrieve specific objects:**
+
 ```
 $ sgd -u "my.username@mydomain.com" -p "password" -l "https://test.salesforce.com" --sobjects "Account,Contact,Opportunity,Case" -c false
+```
+
+**Complete example with all options:**
+
+```
+$ sgd -u "my.username@mydomain.com" -p "password" -l "https://test.salesforce.com" -m true -lc false -e false -o "./output"
 ```
 
 ### Module
@@ -67,6 +99,46 @@ $ sgd -u "my.username@mydomain.com" -p "password" -l "https://test.salesforce.co
       }, console.log);
 ```
 
+## Features
+
+### Object Retrieval Modes
+
+The tool supports three main modes for retrieving objects:
+
+1. **Custom Objects Only** (`-c true` or default): Retrieves all custom objects (ending with `__c`) from your Salesforce org.
+
+2. **Standard Objects Only** (`-c false`): Retrieves all standard objects that meet the following criteria:
+
+   - `custom === false`
+   - `customSetting === false`
+   - `layoutable === true`
+   - `createable === true`
+   - `updateable === true`
+   - `deletable === true`
+   - `deprecatedAndHidden === false`
+   - `keyPrefix !== null`
+   - `queryable === true`
+
+3. **Merged Mode** (`-m true`): Combines both custom and standard objects into a single Excel file.
+
+### Progress Information
+
+The tool automatically displays the number of objects found during processing:
+
+- `Total custom objects found: X` (when using `-c true`)
+- `Total standard objects found: X` (when using `-c false`)
+- `Total objects found (custom + standard): X` (when using `-m true`)
+- `Total objects specified: X` (when using `-s`)
+
+### Excel Sheet Name Sanitization
+
+Sheet names are automatically sanitized to ensure compatibility with Excel:
+
+- Invalid characters (`: \ / ? * [ ]`) are removed
+- Names are limited to 31 characters (Excel's maximum)
+- Duplicate names are automatically suffixed with `_1`, `_2`, `_3`, etc.
+- If a name becomes empty after sanitization, it defaults to "Sheet"
+
 ## Debugging
 
 Since **1.0.3**, you can now run the tool in debug mode to generate a file that contains information about each step during the process.
@@ -77,13 +149,15 @@ Please paste the content of this file in your issues to help analysis.
 ### Debug files location
 
 For a local module:
+
 ```
 CURRENT_DIR/node_modules/sfdc-generate-data-dictionary/files
- ```
+```
 
- Global module:
- - Mac: /usr/local/lib/node_modules/sfdc-generate-data-dictionary/files
- - Windows: %AppData%\npm\node_modules\sfdc-generate-data-dictionary\files
+Global module:
+
+- Mac: /usr/local/lib/node_modules/sfdc-generate-data-dictionary/files
+- Windows: %AppData%\npm\node_modules\sfdc-generate-data-dictionary\files
 
 ## Built With
 
